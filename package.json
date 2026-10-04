@@ -1,0 +1,16 @@
+{
+  "name": "flotta-protocolli-iot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Il progetto a coppie del corso Protocolli IoT (ITS 2026-2027): un'auto simulata e il servizio cloud che la gestisce.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "cloud": "node cloud/server.js",
+    "cloud:watch": "node --watch cloud/server.js",
+    "auto": "node auto/index.js",
+    "flotta": "node auto/flotta.js"
+  }
+}

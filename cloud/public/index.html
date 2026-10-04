@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flotta — dashboard</title>
+<style>
+  :root { --verde: #7ab317; --verde-scuro: #5e8c12; --tinta: #f0f7e2; --inchiostro: #1c1c1c; --grigio: #6e6e6e; --rosso: #c0392b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, Arial, sans-serif; color: var(--inchiostro); background: #fafafa; }
+  header { background: var(--verde); color: white; padding: 16px 24px; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 22px; }
+  header span { opacity: .9; font-size: 14px; }
+  main { padding: 20px 24px; max-width: 1100px; margin: 0 auto; }
+  .avviso { background: #fff4e5; border-left: 4px solid #e67e22; padding: 12px 16px; margin-bottom: 16px; display: none; }
+  .avviso code { background: #fff; padding: 1px 4px; }
+  table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 14px; }
+  th { background: var(--tinta); color: var(--verde-scuro); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .stato { padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .libera { background: var(--tinta); color: var(--verde-scuro); }
+  .in_uso { background: #e3f0ff; color: #1f5fa8; }
+  .in_manutenzione { background: #fdecea; color: var(--rosso); }
+  .barra { width: 90px; height: 8px; background: #eee; border-radius: 4px; display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .barra > i { display: block; height: 100%; border-radius: 4px; background: var(--verde); }
+  .vecchia { color: var(--rosso); font-weight: 600; }
+  button { border: 1px solid var(--verde-scuro); background: white; color: var(--verde-scuro); padding: 4px 10px; border-radius: 4px; cursor: pointer; margin-right: 4px; font-size: 13px; }
+  button:hover { background: var(--tinta); }
+  .vuota { color: var(--grigio); padding: 24px; text-align: center; }
+  #esito { margin-top: 14px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: var(--grigio); min-height: 1.4em; }
+  footer { color: var(--grigio); font-size: 12px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Flotta car sharing</h1>
+  <span id="riassunto">in attesa del servizio…</span>
+</header>
+<main>
+  <div class="avviso" id="avviso"></div>
+  <table>
+    <thead>
+      <tr><th>Targa</th><th>Stato</th><th>Batteria</th><th>Posizione</th><th>Ultima misura</th><th>Comandi</th></tr>
+    </thead>
+    <tbody id="righe"><tr><td colspan="6" class="vuota">Nessuna auto, per ora.</td></tr></tbody>
+  </table>
+  <div id="esito"></div>
+  <footer>
+    La dashboard chiede GET /auto ogni 3 secondi: anche lei fa polling.
+    È la stessa pezza dell'auto, vista dal lato del browser.
+  </footer>
+</main>
+<script>
+  // Tutte le richieste della dashboard portano questa intestazione: il registro
+  // del servizio le conta, ma senza scrivere una riga per ognuna.
+  const INTESTAZIONI = { 'X-Dashboard': '1' };
+
+  const avviso = document.getElementById('avviso');
+  const righe = document.getElementById('righe');
+  const riassunto = document.getElementById('riassunto');
+  const esito = document.getElementById('esito');
+
+  function mostraAvviso(html) {
+    avviso.innerHTML = html;
+    avviso.style.display = html ? 'block' : 'none';
+  }
+
+  function secondiFa(istante) {
+    return Math.max(0, Math.round((Date.now() - new Date(istante).getTime()) / 1000));
+  }
+
+  function riga(auto) {
+    const s = secondiFa(auto.istante);
+    const bottoni = ['apri', 'chiudi', 'manutenzione']
+      .map((azione) => `<button data-targa="${auto.targa}" data-azione="${azione}">${azione}</button>`)
+      .join('');
+    return `<tr>
+      <td><strong>${auto.targa}</strong></td>
+      <td><span class="stato ${auto.stato}">${auto.stato.replace('_', ' ')}</span></td>
+      <td><span class="barra"><i style="width:${auto.batteria}%"></i></span>${auto.batteria}%</td>
+      <td>${auto.lat.toFixed(4)}, ${auto.lon.toFixed(4)}</td>
+      <td class="${s > 30 ? 'vecchia' : ''}">${s} s fa</td>
+      <td>${bottoni}</td>
+    </tr>`;
+  }
+
+  async function aggiorna() {
+    try {
+      const risposta = await fetch('/auto', { headers: INTESTAZIONI });
+      if (risposta.status === 404) {
+        mostraAvviso('Il servizio è acceso ma l\'endpoint <code>GET /auto</code> non c\'è ancora: è uno dei TODO in <code>cloud/server.js</code>.');
+        return;
+      }
+      if (!risposta.ok) {
+        mostraAvviso(`<code>GET /auto</code> ha risposto ${risposta.status}.`);
+        return;
+      }
+      mostraAvviso('');
+      const elenco = await risposta.json();
+      riassunto.textContent = `${elenco.length} auto · aggiornato alle ${new Date().toLocaleTimeString('it-IT')}`;
+      righe.innerHTML = elenco.length
+        ? elenco.map(riga).join('')
+        : '<tr><td colspan="6" class="vuota">Nessuna auto, per ora. Accendiamone una con <code>npm run auto</code>.</td></tr>';
+    } catch {
+      mostraAvviso('Il servizio non risponde: è acceso? (<code>npm run cloud</code>)');
+    }
+  }
+
+  righe.addEventListener('click', async (evento) => {
+    const bottone = evento.target.closest('button');
+    if (!bottone) return;
+    const { targa, azione } = bottone.dataset;
+    try {
+      const risposta = await fetch('/comandi', {
+        method: 'POST',
+        headers: { ...INTESTAZIONI, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targa, azione }),
+      });
+      const testo = await risposta.text();
+      esito.textContent = `POST /comandi {"targa":"${targa}","azione":"${azione}"} → ${risposta.status} ${testo}`;
+    } catch {
+      esito.textContent = 'Il servizio non risponde.';
+    }
+  });
+
+  aggiorna();
+  setInterval(aggiorna, 3000);
+</script>
+</body>
+</html>
