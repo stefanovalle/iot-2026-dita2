@@ -36,39 +36,49 @@ export class TrasportoHttp extends Trasporto {
   }
 
   async inviaTelemetria(dato) {
-    // TODO giornata 2 — mandare una misura al servizio.
-    //
-    //  1. L'indirizzo: POST {this.urlServizio}/auto/{this.targa}/telemetria
-    //  2. Il corpo: il dato trasformato in testo con JSON.stringify(dato), più
-    //     un'intestazione Content-Type che dica al servizio che è JSON.
-    //  3. fetch(indirizzo, { method, headers, body }) restituisce una Promise:
-    //     aspettiamola con await.
-    //  4. Controlliamo la risposta: risposta.ok vale true per tutti i 2xx. Se non
-    //     lo è, lanciamo un errore con il codice (risposta.status): chi ci ha
-    //     chiamato lo stamperà.
-    //
-    //  Domanda da farsi mentre lo scriviamo: se il servizio risponde 400, ha
-    //  senso riprovare? E se risponde 503?
-    throw new Error('TODO giornata 2: inviaTelemetria in auto/trasporti/http.js');
+    const indirizzo = `${this.urlServizio}/auto/${encodeURIComponent(this.targa)}/telemetria`;
+
+    const risposta = await fetch(indirizzo, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dato),
+    });
+
+    if (!risposta.ok) {
+      // 4xx: abbiamo sbagliato noi, e riprovare la stessa richiesta non serve.
+      // 5xx: il servizio è in difficoltà; qui non riproviamo, perché tra
+      // pochi secondi parte comunque la misura successiva.
+      throw new Error(`il servizio ha risposto ${risposta.status} ${risposta.statusText}`);
+    }
   }
 
   ascoltaComandi(quandoArriva) {
-    // TODO giornata 2 — il polling: chiedere ogni tanto se ci sono comandi.
-    //
-    //  1. GET {this.urlServizio}/auto/{this.targa}/comandi
-    //  2. Se la risposta contiene comandi (un array JSON: risposta.json()),
-    //     per ognuno chiamiamo quandoArriva(comando).
-    //  3. Poi aspettiamo this.intervalloPollingMs e ricominciamo. Lo strumento
-    //     giusto è setTimeout: con setInterval, se il servizio è lento, due
-    //     richieste rischiano di sovrapporsi.
-    //  4. Se il servizio non risponde, fetch lancia un errore: non fermiamoci,
-    //     scriviamo un avviso e riproviamo al giro dopo (try/catch).
-    //  5. Ricordiamoci di this.attivo: chiudi() lo mette a false, e a quel
-    //     punto il polling deve smettere.
-    //
-    //  L'intervallo è in cima al file: 2 secondi? 60? Proviamoli entrambi e
-    //  guardiamo il registro del servizio.
-    throw new Error('TODO giornata 2: ascoltaComandi in auto/trasporti/http.js');
+    const indirizzo = `${this.urlServizio}/auto/${encodeURIComponent(this.targa)}/comandi`;
+    this.attivo = true;
+
+    const chiedi = async () => {
+      try {
+        const risposta = await fetch(indirizzo);
+
+        if (risposta.status === 200) {
+          const comandi = await risposta.json();
+          for (const comando of comandi) {
+            await quandoArriva(comando);
+          }
+        } else if (risposta.status !== 204) {
+          console.warn(`[polling] risposta inattesa dal servizio: ${risposta.status}`);
+        }
+      } catch (errore) {
+        // Il servizio è spento o irraggiungibile: non ci fermiamo, riproviamo al giro dopo.
+        console.warn(`[polling] servizio non raggiungibile (${descrivi(errore)}), riprovo`);
+      }
+
+      // setTimeout e non setInterval: la prossima richiesta parte solo quando
+      // questa è finita, così due richieste lente non si sovrappongono mai.
+      if (this.attivo) this.timer = setTimeout(chiedi, this.intervalloPollingMs);
+    };
+
+    chiedi();
   }
 
   async chiudi() {

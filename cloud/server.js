@@ -28,57 +28,67 @@ app.use(registro());
 const dashboard = await readFile(new URL('./public/index.html', import.meta.url));
 app.get('/', (req, res) => res.html(dashboard));
 
-// Un endpoint di esempio, già scritto, da cui copiare la forma:
-//     curl http://localhost:3000/salute
-app.get('/salute', (req, res) => {
-  res.json({ servizio: 'flotta', ora: new Date().toISOString() });
+/** Controlla che una telemetria abbia i campi che ci servono. */
+function telemetriaValida(dato) {
+  return (
+    dato !== null &&
+    typeof dato === 'object' &&
+    typeof dato.lat === 'number' &&
+    typeof dato.lon === 'number' &&
+    typeof dato.batteria === 'number' &&
+    STATI.includes(dato.stato)
+  );
+}
+
+// 1. L'auto manda una misura.
+//    Rispondiamo 204: è andata bene e non c'è niente da restituire. Anche 201
+//    sarebbe difendibile, ma solo se la misura diventasse una risorsa con un
+//    suo indirizzo; 200 con un corpo vuoto è il meno preciso dei tre.
+app.post('/auto/:targa/telemetria', (req, res) => {
+  if (!telemetriaValida(req.body)) {
+    return res.status(400).json({ errore: 'Telemetria incompleta: servono lat, lon, batteria e uno stato valido' });
+  }
+  memoria.salvaTelemetria({ ...req.body, targa: req.params.targa });
+  res.status(204).end();
 });
 
-// ---------------------------------------------------------------------------
-// TODO giornata 2 — gli endpoint. Prima di scriverli decidiamo i nomi:
-// l'indirizzo dice QUALE COSA, il verbo dice QUALE AZIONE.
-//
-// Cosa abbiamo a disposizione dentro un endpoint:
-//     req.params.targa   il pezzo :targa dell'indirizzo
-//     req.query.stato    il ?stato=... in fondo all'indirizzo
-//     req.body           il corpo della richiesta, già trasformato da JSON in oggetto
-//     res.status(201).json({ ... })   risponde con un codice e un oggetto JSON
-//     res.status(204).end()           risponde con un codice e nessun corpo
-//     memoria.salvaTelemetria(dato), memoria.ultimo(targa), memoria.tutte(),
-//     memoria.accodaComando(comando), memoria.prendiComandi(targa)
-//     creaComando(targa, azione), AZIONI, STATI   (da comune/modelli.js)
-//
-// Da scrivere, nell'ordine:
-//
-//  1. POST /auto/:targa/telemetria
-//     L'auto manda una misura: salviamola in memoria (con la targa presa
-//     dall'indirizzo). Cosa rispondiamo, 200, 201 o 204? È la domanda della
-//     slide sugli status code, e qui una risposta è migliore delle altre.
-//     Se nel corpo mancano dei campi: 400.
-//
-//  2. GET /auto/:targa
-//     Lo stato più recente di un'auto. Se la targa non esiste: 404.
-//
-//  3. GET /auto
-//     Tutte le auto conosciute: è quello che chiede la dashboard.
-//     Se avanza tempo: con ?stato=libera restituiamo solo quelle libere.
-//
-//  4. GET /auto/:targa/comandi
-//     È l'endpoint che l'auto interroga in polling: restituisce i comandi
-//     ancora da consegnare e li toglie dalla coda (prendiComandi lo fa già).
-//     Domanda: quando non c'è niente, rispondiamo una lista vuota con 200
-//     oppure 204? Non c'è una sola risposta giusta: sceglierne una e saper
-//     dire perché.
-//
-//  5. POST /comandi       corpo: { "targa": "AA123BB", "azione": "apri" }
-//     Lo usano la dashboard e noi con curl, per mandare un comando a
-//     un'auto. Creiamolo con creaComando e accodiamolo. Azione sconosciuta:
-//     400. Auto mai vista: 404. Tutto bene: 201, con il comando nel corpo.
-//
-// Quando funziona: lasciamo girare un'auto con il polling ogni due secondi e
-// guardiamo il registro riempirsi di righe tutte uguali. È il problema che ci
-// porteremo alla giornata 3.
-// ---------------------------------------------------------------------------
+// 2. Lo stato più recente di un'auto.
+app.get('/auto/:targa', (req, res) => {
+  const stato = memoria.ultimo(req.params.targa);
+  if (!stato) {
+    return res.status(404).json({ errore: `L'auto ${req.params.targa} non si è mai fatta sentire` });
+  }
+  res.json(stato);
+});
+
+// 3. Tutte le auto conosciute. Con ?stato=libera filtra per stato.
+app.get('/auto', (req, res) => {
+  let elenco = memoria.tutte();
+  if (req.query.stato) elenco = elenco.filter((auto) => auto.stato === req.query.stato);
+  res.json(elenco);
+});
+
+// 4. L'endpoint che l'auto interroga in polling: consegna i comandi in
+//    attesa e li toglie dalla coda. Quando non c'è niente rispondiamo una
+//    lista vuota con 200 (anche 204 sarebbe corretto: l'importante è
+//    sceglierne uno e sapere perché).
+app.get('/auto/:targa/comandi', (req, res) => {
+  res.json(memoria.prendiComandi(req.params.targa));
+});
+
+// 5. Un operatore (o la dashboard, o noi con curl) manda un comando.
+app.post('/comandi', (req, res) => {
+  const { targa, azione } = req.body ?? {};
+  if (typeof targa !== 'string' || !AZIONI.includes(azione)) {
+    return res.status(400).json({ errore: `Servono "targa" e un'"azione" tra: ${AZIONI.join(', ')}` });
+  }
+  if (!memoria.ultimo(targa)) {
+    return res.status(404).json({ errore: `L'auto ${targa} non si è mai fatta sentire` });
+  }
+  const comando = creaComando(targa, azione);
+  memoria.accodaComando(comando);
+  res.status(201).json(comando);
+});
 
 app.listen(PORTA, () => {
   console.log(`Servizio flotta in ascolto su http://localhost:${PORTA}  (lì c'è anche la dashboard)`);
