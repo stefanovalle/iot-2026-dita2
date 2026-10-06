@@ -11,6 +11,14 @@
     "cloud": "node cloud/server.js",
     "cloud:watch": "node --watch cloud/server.js",
     "auto": "node auto/index.js",
-    "flotta": "node auto/flotta.js"
+    "flotta": "node auto/flotta.js",
+    "broker": "node broker/aedes.js",
+    "ascolta": "node strumenti/ascolta.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.16.0"
+  },
+  "devDependencies": {
+    "aedes": "^1.2.0"
   }
 }

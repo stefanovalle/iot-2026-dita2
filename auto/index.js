@@ -10,22 +10,28 @@
 //
 // Variabili d'ambiente, se servono:
 //     SERVIZIO   indirizzo del cloud (predefinito http://localhost:3000)
+//     BROKER     indirizzo del broker MQTT (predefinito mqtt://localhost:1883)
 //     OGNI_MS    millisecondi tra una misura e l'altra (predefinito 5000)
+//     PREFISSO   il primo livello dei topic MQTT (predefinito "flotta")
 // ---------------------------------------------------------------------------
 
 import { Auto } from './simulatore.js';
 import { TrasportoHttp } from './trasporti/http.js';
+import { TrasportoMqtt } from './trasporti/mqtt.js';
 
 const targa = (process.argv[2] ?? 'AA123BB').toUpperCase();
 const URL_SERVIZIO = process.env.SERVIZIO ?? 'http://localhost:3000';
+const URL_BROKER = process.env.BROKER ?? 'mqtt://localhost:1883';
 const OGNI_QUANTI_MS = Number(process.env.OGNI_MS ?? 5000);
 
 const auto = new Auto(targa);
 
 // ----- QUI SI CAMBIA -------------------------------------------------------
-// È l'unica riga che sa quale protocollo usiamo. Alla giornata 3 diventerà
-// "new TrasportoMqtt(...)", e il resto del file resterà identico.
-const trasporto = new TrasportoHttp(URL_SERVIZIO, targa);
+// È l'unica riga che sa quale protocollo usiamo. Il resto del file è identico
+// con qualunque trasporto.
+//   giornata 2:  new TrasportoHttp(URL_SERVIZIO, targa)
+//   giornata 3:  new TrasportoMqtt(URL_BROKER, targa, URL_SERVIZIO)
+const trasporto = new TrasportoHttp(URL_SERVIZIO, targa); // TODO giornata 3: passare a TrasportoMqtt
 // ---------------------------------------------------------------------------
 
 // Gli errori "TODO" li stampiamo una volta sola, per non riempire lo schermo.
@@ -42,7 +48,7 @@ function segnala(contesto, errore) {
   console.log(`!! ${contesto}: ${messaggio}${suggerimento}`);
 }
 
-console.log(`Auto ${targa} accesa. Servizio: ${URL_SERVIZIO}. Una misura ogni ${OGNI_QUANTI_MS / 1000} s.`);
+console.log(`Auto ${targa} accesa (${trasporto.constructor.name}). Una misura ogni ${OGNI_QUANTI_MS / 1000} s.`);
 
 // 1. I comandi: il trasporto ci chiama ogni volta che ne arriva uno.
 try {
@@ -68,3 +74,13 @@ setInterval(async () => {
     segnala('telemetria non inviata', errore);
   }
 }, OGNI_QUANTI_MS);
+
+// 3. Ctrl+C: spegnimento educato. Il trasporto saluta prima di chiudere (con
+//    MQTT vuol dire pubblicare "offline" e mandare DISCONNECT). Per vedere il
+//    testamento in azione, invece, chiudiamo la finestra del terminale: è
+//    una sparizione senza saluti.
+process.on('SIGINT', async () => {
+  console.log(`\nAuto ${targa} spenta con garbo.`);
+  await trasporto.chiudi();
+  process.exit(0);
+});

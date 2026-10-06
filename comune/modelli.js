@@ -52,3 +52,18 @@ export function creaTelemetria(targa, lat, lon, batteria, stato) {
 export function creaComando(targa, azione) {
   return { id: randomUUID(), targa, azione, istante: new Date().toISOString() };
 }
+
+/**
+ * Controlla che una telemetria abbia i campi che ci servono. La usa il
+ * servizio, sia quando la misura arriva in HTTP sia quando arriva in MQTT.
+ */
+export function telemetriaValida(dato) {
+  return (
+    dato !== null &&
+    typeof dato === 'object' &&
+    typeof dato.lat === 'number' &&
+    typeof dato.lon === 'number' &&
+    typeof dato.batteria === 'number' &&
+    STATI.includes(dato.stato)
+  );
+}

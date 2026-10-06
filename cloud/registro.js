@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
-// Il registro delle richieste.
+// Il registro del servizio.
 //
-// Scrive una riga per ogni richiesta che arriva, e ogni 30 secondi un
-// riepilogo: quante richieste, quanti byte di HTTP, e quanti di quei byte
-// erano davvero dati. È lo strumento con cui misuriamo il protocollo, e alla
-// giornata 3 lo confronteremo con quello di MQTT.
+// Scrive una riga per ogni richiesta HTTP e per ogni messaggio MQTT che
+// arriva, e ogni 30 secondi un riepilogo: quanti byte di protocollo, e quanti
+// di quei byte erano davvero dati. È lo strumento con cui confrontiamo i
+// protocolli: alla giornata 2 c'era solo HTTP, dalla giornata 3 c'è anche MQTT.
 //
-// I byte sono una stima: contiamo prima riga, intestazioni e corpo, cioè
-// tutto quello che è HTTP. Non contiamo TCP e TLS, che a lezione abbiamo
-// visto pesare anche di più.
+// I byte sono quelli del protocollo e basta: per HTTP prima riga, intestazioni
+// e corpo; per MQTT il pacchetto PUBLISH intero. Non contiamo TCP e TLS, che
+// a lezione abbiamo visto pesare anche di più.
 //
 // Le richieste della dashboard non hanno una riga propria (sarebbero troppe):
 // finiscono solo nel riepilogo.
@@ -17,9 +17,14 @@
 const OGNI_MS = 30_000;
 
 const ora = () => new Date().toLocaleTimeString('it-IT');
+const kb = (byte) => (byte / 1024).toFixed(1);
+const percento = (parte, tutto) => (tutto ? ((100 * parte) / tutto).toFixed(0) : '0');
 
 /** '/auto/AA123BB/comandi' diventa '/auto/:targa/comandi', per raggruppare. */
 const generico = (percorso) => percorso.replace(/^\/auto\/[^/]+/, '/auto/:targa');
+
+/** 'flotta/AA123BB/telemetria' diventa 'flotta/+/telemetria', per raggruppare. */
+const topicGenerico = (topic) => topic.replace(/^([^/]+)\/[^/]+/, '$1/+');
 
 function byteRichiesta(req) {
   let byte = Buffer.byteLength(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`);
@@ -38,50 +43,86 @@ function byteRisposta(res) {
   return byte + 2 + Number(res.getHeader('content-length') ?? 0);
 }
 
-function nuovaFinestra() {
-  return { richieste: 0, byte: 0, datoUtile: 0, pollingVuoti: 0, perTipo: new Map() };
+/** Un pacchetto MQTT intero: 1 byte di tipo, da 1 a 4 di lunghezza, poi il resto. */
+function bytePacchettoMqtt(lunghezzaRestante) {
+  const byteLunghezza = lunghezzaRestante < 128 ? 1 : lunghezzaRestante < 16_384 ? 2 : lunghezzaRestante < 2_097_152 ? 3 : 4;
+  return 1 + byteLunghezza + lunghezzaRestante;
 }
 
-export function registro() {
-  let finestra = nuovaFinestra();
+function nuovaFinestra() {
+  return {
+    http: { richieste: 0, byte: 0, datoUtile: 0, pollingVuoti: 0, perTipo: new Map() },
+    mqtt: { messaggi: 0, byte: 0, datoUtile: 0, perTopic: new Map() },
+  };
+}
 
-  setInterval(() => {
-    if (finestra.richieste === 0) return;
-    const kb = (byte) => (byte / 1024).toFixed(1);
-    const tipi = [...finestra.perTipo.entries()]
+let finestra = nuovaFinestra();
+
+function riepilogo() {
+  const { http, mqtt } = finestra;
+  if (http.richieste === 0 && mqtt.messaggi === 0) return;
+  const elenco = (mappa) =>
+    [...mappa.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([tipo, quante]) => `      ${String(quante).padStart(5)}  ${tipo}`)
       .join('\n');
-    console.log(
-      `\n---- ultimi ${OGNI_MS / 1000} secondi -------------------------------------\n` +
-        `  ${finestra.richieste} richieste, ${kb(finestra.byte)} KB di HTTP, ` +
-        `di cui ${kb(finestra.datoUtile)} KB di telemetria vera (${((100 * finestra.datoUtile) / finestra.byte).toFixed(0)}%)\n` +
-        `  richieste di polling tornate senza comandi: ${finestra.pollingVuoti}\n${tipi}\n` +
-        `-----------------------------------------------------------\n`,
-    );
-    finestra = nuovaFinestra();
-  }, OGNI_MS).unref();
 
+  let testo = `\n---- ultimi ${OGNI_MS / 1000} secondi -------------------------------------\n`;
+  if (http.richieste > 0) {
+    testo +=
+      `  HTTP: ${http.richieste} richieste, ${kb(http.byte)} KB, ` +
+      `di cui ${kb(http.datoUtile)} KB di telemetria vera (${percento(http.datoUtile, http.byte)}%)\n` +
+      `  richieste di polling tornate senza comandi: ${http.pollingVuoti}\n${elenco(http.perTipo)}\n`;
+  }
+  if (mqtt.messaggi > 0) {
+    testo +=
+      `  MQTT: ${mqtt.messaggi} messaggi, ${kb(mqtt.byte)} KB, ` +
+      `di cui ${kb(mqtt.datoUtile)} KB di telemetria vera (${percento(mqtt.datoUtile, mqtt.byte)}%)\n${elenco(mqtt.perTopic)}\n`;
+  }
+  console.log(testo + '-----------------------------------------------------------\n');
+  finestra = nuovaFinestra();
+}
+
+setInterval(riepilogo, OGNI_MS).unref();
+
+/** Il registro delle richieste HTTP: si aggiunge al router con app.use(registro()). */
+export function registro() {
   return (req, res) => {
     const inizio = performance.now();
     const daDashboard = req.headers['x-dashboard'] === '1';
 
     res.on('finish', () => {
+      const http = finestra.http;
       const millisecondi = (performance.now() - inizio).toFixed(1);
       const tipo = `${req.method} ${generico(req.path)}${daDashboard ? '  (dashboard)' : ''}`;
 
-      finestra.richieste += 1;
-      finestra.byte += byteRichiesta(req) + byteRisposta(res);
-      finestra.perTipo.set(tipo, (finestra.perTipo.get(tipo) ?? 0) + 1);
+      http.richieste += 1;
+      http.byte += byteRichiesta(req) + byteRisposta(res);
+      http.perTipo.set(tipo, (http.perTipo.get(tipo) ?? 0) + 1);
       if (req.method === 'POST' && req.path.endsWith('/telemetria')) {
-        finestra.datoUtile += Number(req.headers['content-length'] ?? 0);
+        http.datoUtile += Number(req.headers['content-length'] ?? 0);
       }
       const vuoto = res.statusCode === 204 || Number(res.getHeader('content-length')) <= 2;
-      if (req.method === 'GET' && req.path.endsWith('/comandi') && vuoto) finestra.pollingVuoti += 1;
+      if (req.method === 'GET' && req.path.endsWith('/comandi') && vuoto) http.pollingVuoti += 1;
 
       if (!daDashboard) {
         console.log(`${ora()}  ${req.method.padEnd(6)} ${req.path.padEnd(30)} ${res.statusCode}  ${millisecondi} ms`);
       }
     });
   };
+}
+
+/**
+ * Il registro dei messaggi MQTT: si chiama per ogni messaggio che arriva al
+ * servizio, con quello che mqtt.js ci passa nell'evento 'message'.
+ */
+export function registraMqtt(topic, payload, pacchetto) {
+  const mqtt = finestra.mqtt;
+  const byte = bytePacchettoMqtt(pacchetto.length);
+  mqtt.messaggi += 1;
+  mqtt.byte += byte;
+  if (topic.endsWith('/telemetria')) mqtt.datoUtile += payload.length;
+  const tipo = topicGenerico(topic) + (pacchetto.retain ? '  (retained)' : '');
+  mqtt.perTopic.set(tipo, (mqtt.perTopic.get(tipo) ?? 0) + 1);
+  console.log(`${ora()}  MQTT   ${topic.padEnd(30)} ${String(byte).padStart(3)} byte`);
 }

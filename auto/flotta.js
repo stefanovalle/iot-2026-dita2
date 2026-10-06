@@ -11,9 +11,11 @@
 
 import { Auto } from './simulatore.js';
 import { TrasportoHttp } from './trasporti/http.js';
+import { TrasportoMqtt } from './trasporti/mqtt.js';
 
 const QUANTE = Number(process.argv[2] ?? 10);
 const URL_SERVIZIO = process.env.SERVIZIO ?? 'http://localhost:3000';
+const URL_BROKER = process.env.BROKER ?? 'mqtt://localhost:1883';
 const OGNI_QUANTI_MS = Number(process.env.OGNI_MS ?? 5000);
 
 let inviate = 0;
@@ -34,7 +36,7 @@ for (let i = 1; i <= QUANTE; i++) {
   const auto = new Auto(targa);
 
   // ----- QUI SI CAMBIA (come in auto/index.js) -----
-  const trasporto = new TrasportoHttp(URL_SERVIZIO, targa);
+  const trasporto = new TrasportoHttp(URL_SERVIZIO, targa); // TODO giornata 3: come in auto/index.js
   // -------------------------------------------------
 
   try {
@@ -58,7 +60,7 @@ for (let i = 1; i <= QUANTE; i++) {
   }, Math.random() * OGNI_QUANTI_MS);
 }
 
-console.log(`Flotta di ${QUANTE} auto accesa. Servizio: ${URL_SERVIZIO}.`);
+console.log(`Flotta di ${QUANTE} auto accesa. Servizio: ${URL_SERVIZIO}, broker: ${URL_BROKER}.`);
 
 setInterval(() => {
   console.log(`[flotta] ultimi 10 s: ${inviate} misure inviate, ${comandi} comandi eseguiti, ${errori} errori`);

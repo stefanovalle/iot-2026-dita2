@@ -11,6 +11,7 @@ export class MemoriaFlotta {
   constructor() {
     this.ultimoStato = new Map(); // targa -> ultima telemetria ricevuta
     this.comandiInAttesa = new Map(); // targa -> elenco di comandi da consegnare
+    this.connessione = new Map(); // targa -> "online" | "offline" (giornata 3, MQTT)
   }
 
   /** Salva l'ultima telemetria di un'auto, al posto della precedente. */
@@ -18,14 +19,22 @@ export class MemoriaFlotta {
     this.ultimoStato.set(dato.targa, dato);
   }
 
+  /** Ricorda se un'auto è collegata al broker ("online") oppure no ("offline"). */
+  salvaConnessione(targa, stato) {
+    this.connessione.set(targa, stato);
+  }
+
   /** L'ultimo stato noto di un'auto, oppure undefined se non si è mai fatta sentire. */
   ultimo(targa) {
-    return this.ultimoStato.get(targa);
+    const dato = this.ultimoStato.get(targa);
+    if (!dato) return undefined;
+    const connessione = this.connessione.get(targa);
+    return connessione ? { ...dato, connessione } : dato;
   }
 
   /** Tutte le auto conosciute, in ordine di targa. */
   tutte() {
-    return [...this.ultimoStato.values()].sort((a, b) => a.targa.localeCompare(b.targa));
+    return [...this.ultimoStato.keys()].sort().map((targa) => this.ultimo(targa));
   }
 
   /** Mette in coda un comando per l'auto a cui è destinato. */

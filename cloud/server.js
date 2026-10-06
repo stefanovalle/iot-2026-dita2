@@ -5,9 +5,15 @@
 //     npm run cloud:watch      (si riavvia da solo a ogni salvataggio)
 //
 // Riceve la telemetria delle auto, tiene l'ultimo stato di ognuna e permette
-// di mandare comandi. Alla giornata 2 parla con le auto in HTTP; da quella
-// successiva resterà un'API HTTP per le persone (la dashboard, il
-// back-office) ma con le auto parlerà in un altro modo.
+// di mandare comandi. Alla giornata 2 parla con le auto in HTTP. Dalla
+// giornata 3 riceve la telemetria anche via MQTT, iscrivendosi al broker
+// (cloud/mqtt.js); i comandi restano in HTTP fino alla giornata 4. L'API HTTP
+// resta comunque, per le persone: la dashboard, il back-office.
+//
+// Variabili d'ambiente, se servono:
+//     PORTA      la porta HTTP (predefinita 3000)
+//     BROKER     l'indirizzo del broker MQTT (predefinito mqtt://localhost:1883)
+//     PREFISSO   il primo livello dei topic (predefinito "flotta")
 //
 // La dashboard è su http://localhost:3000 — apriamola nel browser.
 // ---------------------------------------------------------------------------
@@ -16,9 +22,11 @@ import { readFile } from 'node:fs/promises';
 import { creaApp } from './router.js';
 import { registro } from './registro.js';
 import { MemoriaFlotta } from './memoria.js';
-import { AZIONI, STATI, creaComando } from '../comune/modelli.js';
+import { AZIONI, creaComando, telemetriaValida } from '../comune/modelli.js';
+import { collegaBroker } from './mqtt.js';
 
 const PORTA = Number(process.env.PORTA ?? 3000);
+const URL_BROKER = process.env.BROKER ?? 'mqtt://localhost:1883';
 
 const memoria = new MemoriaFlotta();
 const app = creaApp();
@@ -28,19 +36,7 @@ app.use(registro());
 const dashboard = await readFile(new URL('./public/index.html', import.meta.url));
 app.get('/', (req, res) => res.html(dashboard));
 
-/** Controlla che una telemetria abbia i campi che ci servono. */
-function telemetriaValida(dato) {
-  return (
-    dato !== null &&
-    typeof dato === 'object' &&
-    typeof dato.lat === 'number' &&
-    typeof dato.lon === 'number' &&
-    typeof dato.batteria === 'number' &&
-    STATI.includes(dato.stato)
-  );
-}
-
-// 1. L'auto manda una misura.
+// 1. L'auto manda una misura in HTTP (giornata 2; via MQTT arriva in cloud/mqtt.js).
 //    Rispondiamo 204: è andata bene e non c'è niente da restituire. Anche 201
 //    sarebbe difendibile, ma solo se la misura diventasse una risorsa con un
 //    suo indirizzo; 200 con un corpo vuoto è il meno preciso dei tre.
@@ -89,6 +85,10 @@ app.post('/comandi', (req, res) => {
   memoria.accodaComando(comando);
   res.status(201).json(comando);
 });
+
+// 6. Il collegamento al broker MQTT (giornata 3): da lì arriva la telemetria
+//    delle auto che usano TrasportoMqtt.
+collegaBroker(URL_BROKER, memoria);
 
 app.listen(PORTA, () => {
   console.log(`Servizio flotta in ascolto su http://localhost:${PORTA}  (lì c'è anche la dashboard)`);

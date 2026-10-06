@@ -1,0 +1,18 @@
+# Il broker dell'aula: Mosquitto in un container.
+#
+#     docker compose up -d          (dalla cartella broker/)
+#     docker compose logs broker    (per vedere chi si collega)
+#     docker compose down           (per spegnerlo)
+#
+# Porte: 1883 per MQTT, 9001 per MQTT dentro i WebSocket (la dashboard nel
+# browser, giornata 4).
+
+services:
+  broker:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
