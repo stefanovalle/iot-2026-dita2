@@ -15,14 +15,6 @@ import { telemetriaValida } from '../comune/modelli.js';
 import { FILTRO_CONNESSIONE, FILTRO_TELEMETRIA, targaDalTopic } from '../comune/topic.js';
 import { registraMqtt } from './registro.js';
 
-// I TODO si segnalano una volta sola, per non riempire lo schermo.
-const giaSegnalati = new Set();
-function segnalaUnaVolta(messaggio) {
-  if (giaSegnalati.has(messaggio)) return;
-  giaSegnalati.add(messaggio);
-  console.log(`!! ${messaggio}`);
-}
-
 /**
  * Si collega al broker, si iscrive ai topic della flotta e mette in memoria
  * quello che arriva.
@@ -38,14 +30,11 @@ export function collegaBroker(urlBroker, memoria) {
     console.log(`Servizio collegato al broker ${urlBroker}`);
     // Ci iscriviamo a ogni (ri)connessione: con una sessione pulita il broker
     // non si ricorda delle iscrizioni di prima.
-    // TODO giornata 3 (passo 4) — iscriversi anche alla telemetria.
-    //   Un SUBSCRIBE può contenere più iscrizioni: aggiungiamo FILTRO_TELEMETRIA
-    //   (comune/topic.js) con il suo QoS. Il QoS dell'iscrizione è un tetto:
-    //   quale ci serve?
     await client.subscribeAsync({
+      [FILTRO_TELEMETRIA]: { qos: 0 },
       [FILTRO_CONNESSIONE]: { qos: 1 },
     });
-    console.log(`Iscritto a ${FILTRO_CONNESSIONE}`);
+    console.log(`Iscritto a ${FILTRO_TELEMETRIA} e ${FILTRO_CONNESSIONE}`);
   });
 
   client.on('message', (topic, payload, pacchetto) => {
@@ -53,17 +42,19 @@ export function collegaBroker(urlBroker, memoria) {
     const targa = targaDalTopic(topic);
 
     if (topic.endsWith('/telemetria')) {
-      // TODO giornata 3 (passo 4) — mettere in memoria la misura arrivata.
-      //
-      //  1. payload è un Buffer (byte): payload.toString() lo rende testo, e
-      //     JSON.parse lo trasforma in oggetto. Se non è JSON valido, JSON.parse
-      //     lancia un errore: try/catch, un avviso, e ignoriamo il messaggio.
-      //  2. telemetriaValida(dato) controlla i campi, come per la POST.
-      //  3. memoria.salvaTelemetria({ ...dato, targa }): la targa la prendiamo
-      //     dal topic, non dal contenuto. È il topic a dire di chi è.
-      //
-      //  Quando funziona, la dashboard torna a mostrare l'auto.
-      segnalaUnaVolta('TODO giornata 3: salvare la telemetria in cloud/mqtt.js');
+      let dato;
+      try {
+        dato = JSON.parse(payload.toString());
+      } catch {
+        console.warn(`[mqtt] su ${topic} è arrivato qualcosa che non è JSON: lo ignoriamo`);
+        return;
+      }
+      if (!telemetriaValida(dato)) {
+        console.warn(`[mqtt] telemetria incompleta su ${topic}: la ignoriamo`);
+        return;
+      }
+      // La targa la prendiamo dal topic, non dal contenuto: è il topic a dire di chi è.
+      memoria.salvaTelemetria({ ...dato, targa });
     } else if (topic.endsWith('/connessione')) {
       memoria.salvaConnessione(targa, payload.toString());
     }

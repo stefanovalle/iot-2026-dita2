@@ -31,7 +31,7 @@ const auto = new Auto(targa);
 // con qualunque trasporto.
 //   giornata 2:  new TrasportoHttp(URL_SERVIZIO, targa)
 //   giornata 3:  new TrasportoMqtt(URL_BROKER, targa, URL_SERVIZIO)
-const trasporto = new TrasportoHttp(URL_SERVIZIO, targa); // TODO giornata 3: passare a TrasportoMqtt
+const trasporto = new TrasportoMqtt(URL_BROKER, targa, URL_SERVIZIO);
 // ---------------------------------------------------------------------------
 
 // Gli errori "TODO" li stampiamo una volta sola, per non riempire lo schermo.

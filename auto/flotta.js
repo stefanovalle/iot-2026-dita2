@@ -36,7 +36,7 @@ for (let i = 1; i <= QUANTE; i++) {
   const auto = new Auto(targa);
 
   // ----- QUI SI CAMBIA (come in auto/index.js) -----
-  const trasporto = new TrasportoHttp(URL_SERVIZIO, targa); // TODO giornata 3: come in auto/index.js
+  const trasporto = new TrasportoMqtt(URL_BROKER, targa, URL_SERVIZIO);
   // -------------------------------------------------
 
   try {

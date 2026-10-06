@@ -39,17 +39,16 @@ export class TrasportoMqtt extends Trasporto {
       clientId: `auto-${targa}`, // unico sul broker: è la targa
       clean: true, // la sessione ricordata è materia della giornata 4
       keepalive: 60, // secondi: se tacciamo più a lungo, PINGREQ
-      // TODO giornata 3, se avanza tempo (passo 5) — il testamento.
-      //   Un campo "will" con topic, payload, qos e retain: se l'auto sparisce
-      //   senza salutare, il broker pubblica "offline" al posto suo, retained,
-      //   su this.topicConnessione. È la slide «Lo stato dell'auto».
+      // Il testamento: se spariamo senza salutare, il broker pubblica
+      // "offline" al posto nostro, retained, sul topic della connessione.
+      will: { topic: this.topicConnessione, payload: 'offline', qos: 1, retain: true },
     });
 
     this.client.on('connect', () => {
       console.log(`[mqtt] collegata al broker ${urlBroker} come auto-${targa}`);
-      // TODO giornata 3, se avanza tempo (passo 5) — appena connessa diciamo
-      //   che ci siamo: "online" su this.topicConnessione, QoS 1, retained.
-      //   Lo strumento è this.client.publish(topic, testo, { qos, retain }).
+      // Appena connessa diciamo che ci siamo: stesso topic del testamento,
+      // retained anche lui. Sul topic c'è sempre e solo l'ultima verità.
+      this.client.publish(this.topicConnessione, 'online', { qos: 1, retain: true });
     });
 
     // mqtt.js riprova da solo a collegarsi ogni secondo: avvisiamo una volta.
@@ -65,19 +64,13 @@ export class TrasportoMqtt extends Trasporto {
   }
 
   async inviaTelemetria(dato) {
-    // TODO giornata 3 (passo 3) — pubblicare una misura.
-    //
-    //  1. Se la connessione non c'è (this.client.connected è false), lanciamo
-    //     un errore che lo dica: la misura va persa. Alla giornata 4 la
-    //     terremo da parte in una coda, per mandarla dopo.
-    //  2. Il topic è già pronto: this.topicTelemetria.
-    //  3. Il contenuto è testo: JSON.stringify(dato), come con HTTP.
-    //  4. await this.client.publishAsync(topic, contenuto, { qos })
-    //     Quale QoS? Ripensiamo alla tabella «Quale QoS per quale flusso».
-    //
-    //  Quando funziona, apriamo MQTT Explorer (o npm run ascolta): i messaggi
-    //  compaiono lì, senza che il servizio sappia ancora niente.
-    throw new Error('TODO giornata 3: inviaTelemetria in auto/trasporti/mqtt.js');
+    // Se la connessione non c'è, la misura va persa: lo diciamo chiaramente.
+    // Alla giornata 4 la terremo da parte in una coda, per mandarla dopo.
+    if (!this.client.connected) {
+      throw new Error('broker non raggiungibile, misura persa');
+    }
+    // QoS 0: tra pochi secondi ne arriva un'altra, perderne una non cambia niente.
+    await this.client.publishAsync(this.topicTelemetria, JSON.stringify(dato), { qos: 0 });
   }
 
   ascoltaComandi(quandoArriva) {
@@ -86,10 +79,11 @@ export class TrasportoMqtt extends Trasporto {
 
   async chiudi() {
     await this.comandiHttp.chiudi();
-    // TODO giornata 3, se avanza tempo (passo 5) — spegnimento educato: il
-    //   testamento non parte, quindi "offline" lo pubblichiamo noi, prima di
-    //   chiudere (solo se siamo ancora connessi). Usiamo publishAsync con
-    //   await: altrimenti endAsync chiude prima che il messaggio parta.
+    // Spegnimento educato: il testamento non parte, quindi "offline" lo
+    // pubblichiamo noi, prima del DISCONNECT.
+    if (this.client.connected) {
+      await this.client.publishAsync(this.topicConnessione, 'offline', { qos: 1, retain: true });
+    }
     await this.client.endAsync();
   }
 }
