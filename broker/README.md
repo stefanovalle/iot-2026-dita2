@@ -6,7 +6,7 @@ Il broker del corso è **Mosquitto**, in un container Docker. Questa cartella co
 |---|---|
 | `compose.yaml` | dice a Docker quale immagine usare (`eclipse-mosquitto:2`), quali porte aprire e dove trovare la configurazione |
 | `mosquitto.conf` | la configurazione del broker: porta 1883 per MQTT, porta 9001 per MQTT nei WebSocket, accesso senza autenticazione |
-| `aedes.js` | un broker di riserva scritto in JavaScript, per chi non ha Docker (`npm run broker` dalla cartella principale) |
+| `aedes.js` | un broker di riserva scritto in JavaScript, per chi non ha Docker (`npm run broker` dalla cartella principale), con le stesse due porte |
 
 ## Accenderlo
 
@@ -36,7 +36,7 @@ docker compose exec broker mosquitto_pub -t "flotta/prova" -m "ciao"      # un a
 ## Senza Docker
 
 - **Mosquitto installato da pacchetto** (https://mosquitto.org/download/): la configurazione è la stessa. Dalla cartella `broker/`: `mosquitto -c mosquitto.conf -v`.
-- **Il broker di riserva in JavaScript**: `npm install` e poi `npm run broker` dalla cartella principale. Solo porta 1883, niente WebSocket, ma per il laboratorio basta.
+- **Il broker di riserva in JavaScript**: `npm install` e poi `npm run broker` dalla cartella principale. Ascolta sulla 1883 e, dalla giornata 4, anche sui WebSocket della 9001.
 - **Il broker pubblico** `test.mosquitto.org`: funziona senza installare niente, ma tutto quello che pubblichiamo lo vede chiunque. Usiamolo con un prefisso nostro nei topic (`PREFISSO=rossi-bianchi`) e con `BROKER=mqtt://test.mosquitto.org:1883`.
 
 ## Problemi frequenti

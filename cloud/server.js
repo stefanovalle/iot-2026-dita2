@@ -7,12 +7,13 @@
 // Riceve la telemetria delle auto, tiene l'ultimo stato di ognuna e permette
 // di mandare comandi. Alla giornata 2 parla con le auto in HTTP. Dalla
 // giornata 3 riceve la telemetria anche via MQTT, iscrivendosi al broker
-// (cloud/mqtt.js); i comandi restano in HTTP fino alla giornata 4. L'API HTTP
-// resta comunque, per le persone: la dashboard, il back-office.
+// (cloud/mqtt.js); dalla giornata 4 anche i comandi partono dal broker. L'API
+// HTTP resta comunque, per le persone: la dashboard, il back-office.
 //
 // Variabili d'ambiente, se servono:
 //     PORTA      la porta HTTP (predefinita 3000)
 //     BROKER     l'indirizzo del broker MQTT (predefinito mqtt://localhost:1883)
+//     BROKER_WS  il broker visto dal browser (predefinito ws://<host>:9001)
 //     PREFISSO   il primo livello dei topic (predefinito "flotta")
 //
 // La dashboard è su http://localhost:3000 — apriamola nel browser.
@@ -23,7 +24,8 @@ import { creaApp } from './router.js';
 import { registro } from './registro.js';
 import { MemoriaFlotta } from './memoria.js';
 import { AZIONI, creaComando, telemetriaValida } from '../comune/modelli.js';
-import { collegaBroker } from './mqtt.js';
+import { PREFISSO } from '../comune/topic.js';
+import { collegaBroker, pubblicaComando } from './mqtt.js';
 
 const PORTA = Number(process.env.PORTA ?? 3000);
 const URL_BROKER = process.env.BROKER ?? 'mqtt://localhost:1883';
@@ -73,7 +75,7 @@ app.get('/auto/:targa/comandi', (req, res) => {
 });
 
 // 5. Un operatore (o la dashboard, o noi con curl) manda un comando.
-app.post('/comandi', (req, res) => {
+app.post('/comandi', async (req, res) => {
   const { targa, azione } = req.body ?? {};
   if (typeof targa !== 'string' || !AZIONI.includes(azione)) {
     return res.status(400).json({ errore: `Servono "targa" e un'"azione" tra: ${AZIONI.join(', ')}` });
@@ -82,13 +84,35 @@ app.post('/comandi', (req, res) => {
     return res.status(404).json({ errore: `L'auto ${targa} non si è mai fatta sentire` });
   }
   const comando = creaComando(targa, azione);
+  // Giornata 4: il comando parte subito sul broker, verso l'auto. Lo teniamo
+  // anche in coda per le eventuali auto rimaste in HTTP, che lo chiederanno
+  // con il polling (endpoint 4): ogni auto usa un trasporto solo, e se mai
+  // arrivasse due volte l'id lo smaschera.
   memoria.accodaComando(comando);
+  try {
+    await pubblicaComando(broker, comando);
+  } catch (errore) {
+    return res.status(503).json({ errore: `Comando non pubblicato sul broker: ${errore.message}` });
+  }
   res.status(201).json(comando);
 });
 
 // 6. Il collegamento al broker MQTT (giornata 3): da lì arriva la telemetria
-//    delle auto che usano TrasportoMqtt.
-collegaBroker(URL_BROKER, memoria);
+//    delle auto che usano TrasportoMqtt, e da lì partono i comandi (giornata 4).
+const broker = collegaBroker(URL_BROKER, memoria);
+
+// 7. La dashboard nel browser si collega da sola al broker, via WebSocket
+//    (giornata 4): le servono la libreria MQTT.js e due informazioni.
+const libreriaMqtt = await readFile(new URL('../node_modules/mqtt/dist/mqtt.esm.js', import.meta.url));
+app.get('/mqtt.esm.js', (req, res) => {
+  res.set('Content-Type', 'text/javascript; charset=utf-8');
+  res.set('Content-Length', libreriaMqtt.length);
+  res.end(libreriaMqtt);
+});
+app.get('/configurazione', (req, res) => {
+  const host = (req.headers.host ?? 'localhost').split(':')[0];
+  res.json({ brokerWebSocket: process.env.BROKER_WS ?? `ws://${host}:9001`, prefisso: PREFISSO });
+});
 
 app.listen(PORTA, () => {
   console.log(`Servizio flotta in ascolto su http://localhost:${PORTA}  (lì c'è anche la dashboard)`);

@@ -47,8 +47,10 @@ Ogni branch è un passo del corso. Si parte da `main`.
 | `http-soluzione` | **Giornata 2, completata.** La versione HTTP che funziona: per confrontarla con la nostra, dopo. |
 | `mqtt` | **Giornata 3, da completare.** Parte da `http-soluzione`: c'è il broker, c'è il trasporto MQTT con i TODO, e il servizio che si iscrive al broker. |
 | `mqtt-soluzione` | **Giornata 3, completata.** La telemetria viaggia su MQTT, con lo stato online/offline e il testamento. I comandi restano in HTTP fino alla giornata 4. |
+| `mqtt-comandi` | **Giornata 4, da completare.** Parte da `mqtt-soluzione`: i comandi passano dal broker, il polling sparisce. TODO nell'auto, nel servizio e (se avanza tempo) nella dashboard. |
+| `mqtt-comandi-soluzione` | **Giornata 4, completata.** Comandi su MQTT con QoS 1, sessione ricordata a richiesta, dashboard in diretta dal broker via WebSocket. |
 
-I passi successivi (comandi su MQTT, CoAP, AMQP, sicurezza) arriveranno come nuovi branch.
+I passi successivi (CoAP, AMQP, sicurezza) arriveranno come nuovi branch.
 
 Prima di cominciare, creiamo un branch nostro, così il nostro lavoro resta separato da quello del corso:
 
@@ -61,6 +63,7 @@ Quando abbiamo finito, possiamo confrontarci con la soluzione:
 ```
 git diff http-soluzione -- auto/trasporti/http.js cloud/server.js     # giornata 2
 git diff mqtt-soluzione -- auto/trasporti/mqtt.js cloud/mqtt.js       # giornata 3
+git diff mqtt-comandi-soluzione -- auto/trasporti/mqtt.js cloud/mqtt.js cloud/public/index.html   # giornata 4
 ```
 
 Per la giornata 3 partiamo dal lavoro della giornata 2, portandoci dentro le novità del branch `mqtt`:
@@ -97,7 +100,7 @@ cloud/
 broker/
   compose.yaml          il broker dell'aula: Mosquitto in Docker
   mosquitto.conf        la sua configurazione (porte 1883 e 9001)
-  aedes.js              un broker di riserva in JavaScript, per chi non ha Docker
+  aedes.js              un broker di riserva in JavaScript, per chi non ha Docker (porte 1883 e 9001)
 strumenti/
   ascolta.js            stampa i messaggi che passano dal broker
 ```
@@ -162,6 +165,30 @@ Anche `auto/flotta.js` ha la sua riga `QUI SI CAMBIA`: cambiamola per vedere ven
 PREFISSO=rossi-bianchi npm run cloud                          # bash
 $env:PREFISSO="rossi-bianchi"; npm run cloud                  # PowerShell
 BROKER=mqtt://192.168.1.10:1883 npm run auto                  # un broker su un'altra macchina
+```
+
+## Giornata 4: i comandi su MQTT
+
+Ieri la telemetria è passata al broker, ma i comandi arrivavano ancora con il polling HTTP. Oggi anche loro passano dal broker: l'auto si iscrive al proprio topic dei comandi e il servizio ci pubblica. Il polling sparisce.
+
+```
+  cloud/  ── PUBLISH flotta/AA123BB/comandi (QoS 1) ──►  broker  ──►  auto/ (iscritta a flotta/AA123BB/comandi)
+```
+
+Si parte come ieri: `git merge mqtt-comandi` nel nostro branch (oppure `git switch -c coppia-rossi-bianchi-g4 mqtt-comandi`), `npm install`, broker acceso. Poi i TODO:
+
+1. **`auto/trasporti/mqtt.js`** — `iscriviAiComandi`: il SUBSCRIBE a `flotta/AA123BB/comandi`. Con quale QoS?
+2. **`auto/trasporti/mqtt.js`** — il gestore `'message'`: dal messaggio al comando, e il comando a `quandoArriva`. Da MQTT Explorer pubblichiamo a mano un comando sul topic giusto e guardiamo l'auto reagire.
+3. **`cloud/mqtt.js`** — `pubblicaComando`: il servizio pubblica. Proviamo i bottoni della dashboard: quanto ci mette il comando ad arrivare, rispetto al polling di ieri?
+4. **Se avanza tempo — la dashboard in diretta.** In `cloud/public/index.html` la pagina si collega già al broker via WebSocket (porta 9001, slide «MQTT nel browser»): mancano le iscrizioni. Quando ci sono, in alto compare «in diretta dal broker» e la dashboard smette di chiedere `GET /auto`.
+
+Il registro del servizio è la verifica: le righe `GET /auto/.../comandi` non ci sono più.
+
+**Il laboratorio delle sessioni.** Con `SESSIONE=ricordata` l'auto si collega con la sessione ricordata (`clean: false`): spegniamola, mandiamo un comando dalla dashboard, riaccendiamola. Con la sessione pulita il comando è perso; con quella ricordata il broker lo ha tenuto da parte e arriva appena l'auto torna.
+
+```
+SESSIONE=ricordata npm run auto                       # bash
+$env:SESSIONE="ricordata"; npm run auto               # PowerShell
 ```
 
 ## Provare con curl

@@ -8,11 +8,15 @@
 // Qui riceviamo due cose:
 //   - la telemetria:   flotta/+/telemetria   -> la salviamo in memoria
 //   - la connessione:  flotta/+/connessione  -> "online" o "offline", retained
+//
+// GIORNATA 4 — e ne mandiamo una: i comandi, su flotta/{targa}/comandi.
+// Il servizio, che finora aspettava le domande delle auto, adesso parla per
+// primo. È il punto di tutto il corso.
 // ---------------------------------------------------------------------------
 
 import mqtt from 'mqtt';
 import { telemetriaValida } from '../comune/modelli.js';
-import { FILTRO_CONNESSIONE, FILTRO_TELEMETRIA, targaDalTopic } from '../comune/topic.js';
+import { FILTRO_CONNESSIONE, FILTRO_TELEMETRIA, targaDalTopic, topicComandi } from '../comune/topic.js';
 import { registraMqtt } from './registro.js';
 
 /**
@@ -71,4 +75,22 @@ export function collegaBroker(urlBroker, memoria) {
   client.on('connect', () => (avvisato = false));
 
   return client;
+}
+
+/**
+ * Pubblica un comando sul topic dei comandi della sua auto.
+ * @param {import('mqtt').MqttClient} client  quello restituito da collegaBroker
+ * @param {import('../comune/modelli.js').Comando} comando
+ */
+export async function pubblicaComando(client, comando) {
+  // TODO giornata 4 (passo 3) — il servizio parla per primo.
+  //
+  //  1. Se il client non è connesso (client.connected), lanciamo un errore:
+  //     POST /comandi risponderà 503.
+  //  2. Il topic: topicComandi(comando.targa), da comune/topic.js.
+  //  3. await client.publishAsync(topic, JSON.stringify(comando), { qos, retain })
+  //     QoS: deve arrivare. Retained: pensiamoci bene. Un "apri" lasciato
+  //     appeso al topic cosa farebbe a chi si iscrive domani mattina?
+  //  4. Una riga nel log, come quelle del registro, aiuta a vedere cosa parte.
+  throw new Error('TODO giornata 4: pubblicaComando in cloud/mqtt.js');
 }

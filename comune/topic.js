@@ -8,6 +8,7 @@
 // Sono quelli dell'albero disegnato a lezione:
 //     flotta/AA123BB/telemetria     la misura, ogni pochi secondi
 //     flotta/AA123BB/connessione    "online" oppure "offline", retained
+//     flotta/AA123BB/comandi        i comandi per quell'auto (giornata 4)
 // Se il nostro albero è diverso, cambiamolo qui: auto e servizio leggono
 // entrambi da questo file.
 //
@@ -24,6 +25,9 @@ export const topicTelemetria = (targa) => `${PREFISSO}/${targa}/telemetria`;
 
 /** Il topic con lo stato della connessione di un'auto: "online" o "offline". */
 export const topicConnessione = (targa) => `${PREFISSO}/${targa}/connessione`;
+
+/** Il topic dei comandi destinati a un'auto: l'auto ci si iscrive, il servizio ci pubblica. */
+export const topicComandi = (targa) => `${PREFISSO}/${targa}/comandi`;
 
 /** Il filtro per ricevere la telemetria di tutte le auto. */
 export const FILTRO_TELEMETRIA = `${PREFISSO}/+/telemetria`;

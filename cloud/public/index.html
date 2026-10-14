@@ -11,6 +11,7 @@
   header { background: var(--verde); color: white; padding: 16px 24px; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
   header h1 { margin: 0; font-size: 22px; }
   header span { opacity: .9; font-size: 14px; }
+  #canale { margin-left: auto; font-size: 12px; }
   main { padding: 20px 24px; max-width: 1100px; margin: 0 auto; }
   .avviso { background: #fff4e5; border-left: 4px solid #e67e22; padding: 12px 16px; margin-bottom: 16px; display: none; }
   .avviso code { background: #fff; padding: 1px 4px; }
@@ -38,6 +39,7 @@
 <header>
   <h1>Flotta car sharing</h1>
   <span id="riassunto">in attesa del servizio…</span>
+  <span id="canale">aggiornamento: GET /auto ogni 3 s</span>
 </header>
 <main>
   <div class="avviso" id="avviso"></div>
@@ -49,8 +51,9 @@
   </table>
   <div id="esito"></div>
   <footer>
-    La dashboard chiede GET /auto ogni 3 secondi: anche lei fa polling.
-    È la stessa pezza dell'auto, vista dal lato del browser.
+    Finché non è collegata al broker, la dashboard chiede GET /auto ogni 3 secondi: anche lei fa polling,
+    la stessa pezza dell'auto vista dal lato del browser. Dalla giornata 4 si iscrive al broker via
+    WebSocket e il polling si ferma: le righe cambiano quando arriva un messaggio.
   </footer>
 </main>
 <script>
@@ -87,7 +90,34 @@
     </tr>`;
   }
 
+  // Le auto che conosciamo, per targa. La riempie GET /auto e, dalla giornata 4,
+  // anche il broker via WebSocket (lo script più sotto).
+  const flotta = new Map();
+  let inDiretta = false; // true quando la dashboard è collegata al broker
+
+  function disegna() {
+    const elenco = [...flotta.values()].sort((a, b) => a.targa.localeCompare(b.targa));
+    riassunto.textContent = `${elenco.length} auto · aggiornato alle ${new Date().toLocaleTimeString('it-IT')}`;
+    righe.innerHTML = elenco.length
+      ? elenco.map(riga).join('')
+      : '<tr><td colspan="6" class="vuota">Nessuna auto, per ora. Accendiamone una con <code>npm run auto</code>.</td></tr>';
+  }
+
+  // Quello che serve allo script MQTT della giornata 4.
+  window.dashboard = {
+    aggiornaAuto(targa, campi) {
+      const auto = flotta.get(targa);
+      if (!auto && !('lat' in campi)) return; // solo lo stato di connessione: aspettiamo una misura
+      flotta.set(targa, { ...auto, ...campi, targa });
+      disegna();
+    },
+    inDiretta(attiva) {
+      inDiretta = attiva;
+    },
+  };
+
   async function aggiorna() {
+    if (inDiretta) return; // collegati al broker: niente polling
     try {
       const risposta = await fetch('/auto', { headers: INTESTAZIONI });
       if (risposta.status === 404) {
@@ -100,10 +130,9 @@
       }
       mostraAvviso('');
       const elenco = await risposta.json();
-      riassunto.textContent = `${elenco.length} auto · aggiornato alle ${new Date().toLocaleTimeString('it-IT')}`;
-      righe.innerHTML = elenco.length
-        ? elenco.map(riga).join('')
-        : '<tr><td colspan="6" class="vuota">Nessuna auto, per ora. Accendiamone una con <code>npm run auto</code>.</td></tr>';
+      flotta.clear();
+      for (const auto of elenco) flotta.set(auto.targa, auto);
+      disegna();
     } catch {
       mostraAvviso('Il servizio non risponde: è acceso? (<code>npm run cloud</code>)');
     }
@@ -128,6 +157,50 @@
 
   aggiorna();
   setInterval(aggiorna, 3000);
+  // Anche in diretta, ogni tanto ridisegniamo: la colonna "ultima misura" invecchia.
+  setInterval(() => inDiretta && disegna(), 1000);
+</script>
+<script type="module">
+  // -------------------------------------------------------------------------
+  // GIORNATA 4 — la dashboard si iscrive al broker, via WebSocket.
+  //
+  // Il browser non può aprire una connessione TCP verso la porta 1883: MQTT
+  // viaggia dentro un WebSocket, sulla porta 9001 di Mosquitto. La libreria
+  // è la stessa MQTT.js dell'auto, nella versione per il browser.
+  // -------------------------------------------------------------------------
+  import mqtt from '/mqtt.esm.js';
+
+  const canale = document.getElementById('canale');
+  const configurazione = await (await fetch('/configurazione', { headers: { 'X-Dashboard': '1' } })).json();
+  const prefisso = configurazione.prefisso;
+
+  const client = mqtt.connect(configurazione.brokerWebSocket, {
+    clientId: `dashboard-${Math.random().toString(16).slice(2, 8)}`,
+    reconnectPeriod: 5000,
+  });
+
+  client.on('connect', () => {
+    // TODO giornata 4, se avanza tempo (passo 4) — la dashboard in diretta.
+    //
+    //  1. client.subscribe(...) ai filtri della telemetria e della connessione
+    //     di tutte le auto: `${prefisso}/+/telemetria` e `${prefisso}/+/connessione`.
+    //  2. window.dashboard.inDiretta(true): il polling di GET /auto si ferma.
+    //  3. Nel gestore 'message' qui sotto, aggiorniamo la riga dell'auto.
+    canale.textContent = 'collegata al broker, ma senza iscrizioni: TODO in cloud/public/index.html';
+  });
+
+  client.on('message', (topic, payload) => {
+    // TODO giornata 4, se avanza tempo — la targa sta nel topic:
+    //   topic.slice(prefisso.length + 1).split('/')[0]
+    // Poi window.dashboard.aggiornaAuto(targa, campi), dove campi è:
+    //   per la telemetria, l'oggetto JSON.parse(payload.toString());
+    //   per la connessione, { connessione: payload.toString() }.
+  });
+
+  client.on('close', () => {
+    window.dashboard.inDiretta(false);
+    canale.textContent = `broker non raggiungibile via WebSocket: aggiornamento con GET /auto ogni 3 s`;
+  });
 </script>
 </body>
 </html>
