@@ -22,14 +22,6 @@ import { topicComandi, topicConnessione, topicTelemetria } from '../../comune/to
 
 const SESSIONE_RICORDATA = process.env.SESSIONE === 'ricordata';
 
-// I TODO si segnalano una volta sola, per non riempire lo schermo.
-const giaSegnalati = new Set();
-function todo(messaggio) {
-  if (giaSegnalati.has(messaggio)) return;
-  giaSegnalati.add(messaggio);
-  console.log(`!! ${messaggio}`);
-}
-
 export class TrasportoMqtt extends Trasporto {
   /**
    * @param {string} urlBroker  per esempio "mqtt://localhost:1883"
@@ -68,15 +60,18 @@ export class TrasportoMqtt extends Trasporto {
     // Ogni messaggio ricevuto passa da qui, qualunque sia il topic.
     this.client.on('message', (topic, payload) => {
       if (topic !== this.topicComandi || !this.quandoArriva) return;
-      // TODO giornata 4 (passo 2) — consegnare il comando al resto del programma.
-      //
-      //  1. payload è un Buffer: payload.toString() è il testo, JSON.parse lo
-      //     trasforma nell'oggetto comando { id, targa, azione, istante }.
-      //     Se non è JSON valido: try/catch, un avviso, e lo ignoriamo.
-      //  2. this.quandoArriva(comando): è la funzione che auto/index.js ci ha
-      //     passato in ascoltaComandi. Esegue il comando e riconosce i doppioni
-      //     dall'id (con QoS 1 un comando può arrivare due volte).
-      todo('TODO giornata 4: consegnare il comando, nel gestore "message" di auto/trasporti/mqtt.js');
+      let comando;
+      try {
+        comando = JSON.parse(payload.toString());
+      } catch {
+        console.warn(`[mqtt] su ${topic} è arrivato qualcosa che non è JSON: lo ignoriamo`);
+        return;
+      }
+      // Il comando è un oggetto { id, targa, azione, istante }: lo passiamo
+      // al resto del programma, che sa cosa farne (e riconosce i doppioni).
+      Promise.resolve(this.quandoArriva(comando)).catch((errore) =>
+        console.warn(`[mqtt] errore nell'eseguire il comando: ${errore.message}`),
+      );
     });
 
     // mqtt.js riprova da solo a collegarsi ogni secondo: avvisiamo una volta.
@@ -109,17 +104,14 @@ export class TrasportoMqtt extends Trasporto {
 
   /** Il SUBSCRIBE al topic dei comandi di questa auto. */
   async iscriviAiComandi() {
-    // TODO giornata 4 (passo 1) — iscriversi al topic dei comandi.
-    //
-    //  1. Il topic è già pronto: this.topicComandi (flotta/AA123BB/comandi).
-    //  2. await this.client.subscribeAsync(topic, { qos }) restituisce un
-    //     elenco con il QoS concesso dal broker (il SUBACK): stampiamolo.
-    //     Quale QoS per un comando? Ripensiamo alla tabella della giornata 3.
-    //  3. Se qualcosa va storto, un avviso (try/catch): non fermiamo l'auto.
-    //
-    //  Questo metodo lo chiamano ascoltaComandi e l'evento 'connect': con la
-    //  sessione pulita il broker dimentica le iscrizioni a ogni disconnessione.
-    todo('TODO giornata 4: iscriversi ai comandi in iscriviAiComandi, auto/trasporti/mqtt.js');
+    try {
+      // QoS 1: un comando deve arrivare. Se arriva due volte, l'id lo
+      // smaschera e l'auto non lo esegue di nuovo.
+      const [concessa] = await this.client.subscribeAsync(this.topicComandi, { qos: 1 });
+      console.log(`[mqtt] in ascolto dei comandi su ${this.topicComandi} (QoS concesso: ${concessa.qos})`);
+    } catch (errore) {
+      console.warn(`[mqtt] iscrizione ai comandi non riuscita: ${errore.message}`);
+    }
   }
 
   async chiudi() {

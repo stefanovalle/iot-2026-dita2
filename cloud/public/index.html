@@ -180,21 +180,22 @@
   });
 
   client.on('connect', () => {
-    // TODO giornata 4, se avanza tempo (passo 4) — la dashboard in diretta.
-    //
-    //  1. client.subscribe(...) ai filtri della telemetria e della connessione
-    //     di tutte le auto: `${prefisso}/+/telemetria` e `${prefisso}/+/connessione`.
-    //  2. window.dashboard.inDiretta(true): il polling di GET /auto si ferma.
-    //  3. Nel gestore 'message' qui sotto, aggiorniamo la riga dell'auto.
-    canale.textContent = 'collegata al broker, ma senza iscrizioni: TODO in cloud/public/index.html';
+    client.subscribe({ [`${prefisso}/+/telemetria`]: { qos: 0 }, [`${prefisso}/+/connessione`]: { qos: 1 } });
+    window.dashboard.inDiretta(true);
+    canale.textContent = `in diretta dal broker (${configurazione.brokerWebSocket})`;
   });
 
   client.on('message', (topic, payload) => {
-    // TODO giornata 4, se avanza tempo — la targa sta nel topic:
-    //   topic.slice(prefisso.length + 1).split('/')[0]
-    // Poi window.dashboard.aggiornaAuto(targa, campi), dove campi è:
-    //   per la telemetria, l'oggetto JSON.parse(payload.toString());
-    //   per la connessione, { connessione: payload.toString() }.
+    const targa = topic.slice(prefisso.length + 1).split('/')[0];
+    if (topic.endsWith('/telemetria')) {
+      try {
+        window.dashboard.aggiornaAuto(targa, JSON.parse(payload.toString()));
+      } catch {
+        // non è JSON: lo ignoriamo
+      }
+    } else if (topic.endsWith('/connessione')) {
+      window.dashboard.aggiornaAuto(targa, { connessione: payload.toString() });
+    }
   });
 
   client.on('close', () => {
