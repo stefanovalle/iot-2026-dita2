@@ -1,11 +1,21 @@
-# Il broker dell'aula: Mosquitto in un container.
+# I broker dell'aula, in container.
 #
-#     docker compose up -d          (dalla cartella broker/)
-#     docker compose logs broker    (per vedere chi si collega)
-#     docker compose down           (per spegnerlo)
+#     docker compose up -d                 (dalla cartella broker/: li accende tutti e due)
+#     docker compose up -d rabbitmq        (solo RabbitMQ, giornata 6)
+#     docker compose logs broker           (per vedere chi si collega a Mosquitto)
+#     docker compose down                  (per spegnerli)
 #
-# Porte: 1883 per MQTT, 9001 per MQTT dentro i WebSocket (la dashboard nel
-# browser, giornata 4).
+# Mosquitto: 1883 per MQTT, 9001 per MQTT dentro i WebSocket (la dashboard
+# nel browser, giornata 4).
+#
+# RabbitMQ (giornata 6): 5672 per AMQP, quella dei programmi; 15672 per la
+# console web, da aprire nel browser: http://localhost:15672, utente flotta,
+# password flotta. Serve l'immagine che finisce per "management": senza, il
+# broker funziona ma la console non c'è. Il primo avvio scarica qualche
+# centinaio di megabyte.
+#
+# Utente e password scritti qui in chiaro: in laboratorio va bene, in
+# produzione no. Alla giornata 7 si sistema.
 
 services:
   broker:
@@ -16,3 +26,23 @@ services:
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    # Un nome fisso: RabbitMQ salva i dati sotto il nome della macchina, e
+    # senza questa riga a ogni ricreazione del container ripartirebbe vuoto.
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: flotta
+      RABBITMQ_DEFAULT_PASS: flotta
+    volumes:
+      # Code durevoli e messaggi persistenti sopravvivono al riavvio del
+      # broker solo se il disco sopravvive al container.
+      - rabbitmq-dati:/var/lib/rabbitmq
+    restart: unless-stopped
+
+volumes:
+  rabbitmq-dati:

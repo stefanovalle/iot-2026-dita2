@@ -8,13 +8,16 @@
 // di mandare comandi. Alla giornata 2 parla con le auto in HTTP. Dalla
 // giornata 3 riceve la telemetria anche via MQTT, iscrivendosi al broker
 // (cloud/mqtt.js); dalla giornata 4 anche i comandi partono dal broker. L'API
-// HTTP resta comunque, per le persone: la dashboard, il back-office.
+// HTTP resta comunque, per le persone: la dashboard, il back-office. Dalla
+// giornata 6 pubblica anche gli eventi per gli uffici su RabbitMQ
+// (cloud/amqp.js): MQTT verso le auto, AMQP dentro il cloud.
 //
 // Variabili d'ambiente, se servono:
 //     PORTA      la porta HTTP (predefinita 3000)
 //     BROKER     l'indirizzo del broker MQTT (predefinito mqtt://localhost:1883)
 //     BROKER_WS  il broker visto dal browser (predefinito ws://<host>:9001)
 //     PREFISSO   il primo livello dei topic (predefinito "flotta")
+//     AMQP       l'indirizzo di RabbitMQ (predefinito amqp://flotta:flotta@localhost:5672)
 //
 // La dashboard è su http://localhost:3000 — apriamola nel browser.
 // ---------------------------------------------------------------------------
@@ -26,6 +29,8 @@ import { MemoriaFlotta } from './memoria.js';
 import { AZIONI, creaComando, telemetriaValida } from '../comune/modelli.js';
 import { PREFISSO } from '../comune/topic.js';
 import { collegaBroker, pubblicaComando } from './mqtt.js';
+import { collegaAmqp, pubblicaEvento } from './amqp.js';
+import { URL_AMQP, creaEvento, tipoEvento } from '../comune/eventi.js';
 
 const PORTA = Number(process.env.PORTA ?? 3000);
 const URL_BROKER = process.env.BROKER ?? 'mqtt://localhost:1883';
@@ -112,6 +117,25 @@ app.get('/mqtt.esm.js', (req, res) => {
 app.get('/configurazione', (req, res) => {
   const host = (req.headers.host ?? 'localhost').split(':')[0];
   res.json({ brokerWebSocket: process.env.BROKER_WS ?? `ws://${host}:9001`, prefisso: PREFISSO });
+});
+
+// 8. Gli eventi per gli uffici (giornata 6). Quando un'auto cambia stato, la
+//    memoria ce lo dice; se il cambio interessa a qualcuno (inizio o fine di
+//    un noleggio, un guasto) lo pubblichiamo su RabbitMQ. A chi arriva lo
+//    decidono i binding, non il servizio.
+const rabbit = collegaAmqp(URL_AMQP);
+const giaSegnalati = new Set();
+memoria.on('cambioStato', async (prima, dopo, dato) => {
+  const tipo = tipoEvento(prima, dopo);
+  if (!tipo) return;
+  try {
+    await pubblicaEvento(rabbit, creaEvento(tipo, dato));
+  } catch (errore) {
+    // I TODO e i guasti che si ripetono li stampiamo una volta sola.
+    if (giaSegnalati.has(errore.message)) return;
+    giaSegnalati.add(errore.message);
+    console.log(`!! evento ${tipo} di ${dato.targa} non pubblicato: ${errore.message}`);
+  }
 });
 
 app.listen(PORTA, () => {
