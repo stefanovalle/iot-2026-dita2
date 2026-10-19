@@ -50,8 +50,10 @@ Ogni branch è un passo del corso. Si parte da `main`.
 | `mqtt-comandi` | **Giornata 4, da completare.** Parte da `mqtt-soluzione`: i comandi passano dal broker, il polling sparisce. TODO nell'auto, nel servizio e (se avanza tempo) nella dashboard. |
 | `mqtt-comandi-soluzione` | **Giornata 4, completata.** Comandi su MQTT con QoS 1, sessione ricordata a richiesta, dashboard in diretta dal broker via WebSocket. |
 | `coap` | **Giornata 5, niente da completare.** Parte da `mqtt-comandi-soluzione` e aggiunge due strumenti: un client CoAP da terminale e un sensore di parcheggio finto che parla CoAP. Il progetto della flotta non cambia. |
+| `amqp` | **Giornata 6, da completare.** Parte da `coap`: RabbitMQ in `broker/compose.yaml`, il servizio che pubblica gli eventi della flotta e i tre uffici che li ricevono, con i TODO. |
+| `amqp-soluzione` | **Giornata 6, completata.** Eventi su AMQP con conferme e flag mandatory, tre uffici con ack, prefetch e coda degli errori. MQTT resta tra le auto e il servizio. |
 
-I passi successivi (AMQP, sicurezza) arriveranno come nuovi branch.
+Il passo successivo (sicurezza) arriveranno come nuovi branch.
 
 Prima di cominciare, creiamo un branch nostro, così il nostro lavoro resta separato da quello del corso:
 
@@ -65,6 +67,7 @@ Quando abbiamo finito, possiamo confrontarci con la soluzione:
 git diff http-soluzione -- auto/trasporti/http.js cloud/server.js     # giornata 2
 git diff mqtt-soluzione -- auto/trasporti/mqtt.js cloud/mqtt.js       # giornata 3
 git diff mqtt-comandi-soluzione -- auto/trasporti/mqtt.js cloud/mqtt.js cloud/public/index.html   # giornata 4
+git diff amqp-soluzione -- cloud/amqp.js uffici/index.js                 # giornata 6
 ```
 
 Per la giornata 3 partiamo dal lavoro della giornata 2, portandoci dentro le novità del branch `mqtt`:
@@ -83,6 +86,7 @@ Se il merge segnala conflitti nei file della giornata 2, teniamo la nostra versi
 comune/
   modelli.js            i due messaggi che viaggiano: Telemetria e Comando
   topic.js              i nomi dei topic MQTT, uguali per auto e servizio
+  eventi.js             gli eventi della flotta e i nomi di exchange e code (giornata 6)
 auto/
   index.js              un'auto: genera la telemetria e esegue i comandi
   flotta.js             tante auto in un solo programma
@@ -94,18 +98,22 @@ auto/
 cloud/
   server.js             il servizio e i suoi endpoint <-- TODO giornata 2
   mqtt.js               il servizio iscritto al broker <-- TODO giornata 3
+  amqp.js               il servizio che pubblica gli eventi su RabbitMQ <-- TODO giornata 6
   memoria.js            dove il servizio tiene i dati (in RAM)
   registro.js           scrive ogni richiesta HTTP e ogni messaggio MQTT, e un riepilogo ogni 30 s
   router.js             un mini-Express scritto per il corso
   public/index.html     la dashboard
+uffici/
+  index.js              fatturazione, manutenzione, analisi: chi riceve gli eventi <-- TODO giornata 6
 broker/
-  compose.yaml          il broker dell'aula: Mosquitto in Docker
+  compose.yaml          i broker dell'aula in Docker: Mosquitto e (giornata 6) RabbitMQ
   mosquitto.conf        la sua configurazione (porte 1883 e 9001)
   aedes.js              un broker di riserva in JavaScript, per chi non ha Docker (porte 1883 e 9001)
 strumenti/
   ascolta.js            stampa i messaggi che passano dal broker
   coap.js               un client CoAP da terminale: get, scopri, osserva   (giornata 5)
   sensore-coap.js       un sensore di parcheggio finto che parla CoAP       (giornata 5)
+  noleggi.js            fa partire e finire dei noleggi, per generare eventi (giornata 6)
 ```
 
 ## La regola che rende il progetto interessante
@@ -226,6 +234,59 @@ Il sensore espone anche `/posto/12`, che passa da libero a occupato da solo: è 
 
 `strumenti/coap.js` è una pagina di codice: vale la pena aprirlo. La libreria somiglia a `node:http` (`coap.request`, `coap.createServer`), e la differenza con HTTP sta tutta in due opzioni: `observe` e `confirmable`.
 
+## Giornata 6: gli eventi su AMQP
+
+Oggi non si sostituisce niente: MQTT resta tra le auto e il servizio. Dentro il cloud si aggiunge RabbitMQ. Quando un'auto cambia stato, il servizio pubblica un evento sull'exchange `flotta.eventi` e ha finito: a chi arriva lo decidono i binding delle code degli uffici.
+
+```
+  auto ──MQTT──► broker ──► cloud/ ──AMQP──► flotta.eventi (topic)
+                                              ├─ noleggio.fine.*             ──► coda fatturazione
+                                              ├─ noleggio.#  auto.guasto.*   ──► coda manutenzione
+                                              └─ #                           ──► coda analisi
+```
+
+Gli eventi sono tre, e la chiave va dal generale al particolare: `noleggio.inizio.milano`, `noleggio.fine.milano`, `auto.guasto.milano` (un'auto mandata in manutenzione dalla dashboard).
+
+Si parte come sempre: `git merge amqp` nel nostro branch (oppure `git switch -c coppia-rossi-bianchi-g6 amqp`) e `npm install`, che aggiunge [`amqplib`](https://www.npmjs.com/package/amqplib). Poi accendiamo RabbitMQ:
+
+```
+cd broker
+docker compose up -d rabbitmq
+```
+
+La console è su http://localhost:15672, utente `flotta`, password `flotta`. Il primo avvio scarica qualche centinaio di megabyte: lanciamolo mentre si parla.
+
+I passi del laboratorio:
+
+1. **Tutto a mano, dalla console.** Creiamo l'exchange `flotta.eventi` di tipo topic, le code `fatturazione`, `manutenzione` e `analisi` (durevoli), e i binding della figura. Poi da *Exchanges → flotta.eventi → Publish message* pubblichiamo un messaggio con chiave `noleggio.fine.milano` e guardiamo in quali code è finito. Cambiamo la chiave e riproviamo.
+2. **`cloud/amqp.js`** — `pubblicaEvento`: il servizio la chiama già quando un'auto cambia stato. Accendiamo servizio e auto, apriamo e chiudiamo l'auto dalla dashboard, e guardiamo i messaggi arrivare nelle code dalla console.
+3. **`uffici/index.js`** — `leghiLaCoda` e `quandoArriva`. Un terminale per ufficio:
+
+   ```
+   npm run ufficio -- fatturazione
+   npm run ufficio -- manutenzione
+   npm run ufficio -- analisi
+   ```
+
+4. **La prova che conta.** Spegniamo l'analisi con Ctrl+C, chiudiamo dieci noleggi e riaccendiamola:
+
+   ```
+   npm run flotta                 # in un altro terminale: più auto, più veloce
+   npm run noleggi -- 10
+   npm run ufficio -- analisi     # "20 eventi ci aspettavano": dieci inizi e dieci fini
+   ```
+
+5. **Se avanza tempo — la coda degli errori.** Riavviamo la fatturazione dicendole di rifiutare gli eventi di un'auto: finiscono in `fatturazione.errori`, dove dalla console (*Get messages*) si vede perché.
+
+   ```
+   FALLISCI=AA123BB npm run ufficio -- fatturazione                 # bash
+   $env:FALLISCI="AA123BB"; npm run ufficio -- fatturazione         # PowerShell
+   ```
+
+Le code create a mano al passo 1 non hanno il *dead letter*: l'ufficio lo dice all'avvio e usa quella che c'è. Per il passo 5 cancelliamo la coda `fatturazione` dalla console e lasciamola ricreare al programma.
+
+**RabbitMQ condiviso con altre coppie?** Lo stesso `PREFISSO` dei topic MQTT cambia anche i nomi di exchange e code: con `PREFISSO=rossi-bianchi` diventano `rossi-bianchi.eventi`, `rossi-bianchi.fatturazione` e così via. Va dato uguale a servizio e uffici.
+
 ## Provare con curl
 
 Su Windows, in PowerShell, scriviamo `curl.exe` e non `curl`: il secondo è un'altra cosa.
@@ -242,7 +303,10 @@ curl -i -X POST http://localhost:3000/comandi -H "Content-Type: application/json
 - **`ECONNREFUSED`** nell'auto: il servizio è spento, o è su un'altra porta. Con `SERVIZIO=http://localhost:3001 npm run auto` l'auto lo cerca altrove.
 - **`fetch is not defined`**: Node.js è troppo vecchio. Serve la versione 20 o successiva.
 - **`Nessun endpoint per ...`**: l'endpoint non è ancora scritto, o l'indirizzo ha un errore di battitura.
-- **`Cannot find package 'mqtt'`** (o `'coap'`): manca `npm install` (dalla giornata 3).
+- **`Cannot find package 'mqtt'`** (o `'coap'`, o `'amqplib'`): manca `npm install` (dalla giornata 3).
+- **`RabbitMQ non raggiungibile: ECONNREFUSED`**: RabbitMQ è spento, o sta ancora partendo (ci mette una ventina di secondi). `docker compose up -d rabbitmq` in `broker/`; il servizio riprova da solo ogni 5 secondi.
+- **`La coda ... esiste già con impostazioni diverse`**: l'abbiamo creata a mano dalla console. Funziona lo stesso, ma senza coda degli errori; se ci serve, cancelliamola dalla console e riavviamo l'ufficio.
+- **`nessuna coda per la chiave ...`**: l'evento è stato pubblicato ma nessun binding lo prende. Di solito è un errore di battitura nella chiave o nel binding, oppure i jolly scritti come in MQTT: qui una parola è `*`, non `+`, e il separatore è il punto.
 - **`Nessuna risposta in 10 secondi`** da `npm run coap`: la rete blocca UDP sulla porta 5683. Usiamo il sensore finto (`npm run sensore`) con `COAP=coap://localhost`.
 - **`EADDRINUSE`** da `npm run sensore`: c'è già un sensore acceso, oppure un altro programma usa la porta 5683. `PORTA_COAP=5684 npm run sensore` e `COAP=coap://localhost:5684`.
 - **`broker non raggiungibile: ECONNREFUSED`**: il broker è spento. `docker compose up -d` nella cartella `broker/`, oppure `npm run broker`.

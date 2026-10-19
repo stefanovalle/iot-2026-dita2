@@ -5,18 +5,32 @@
 // consegnati. Sta tutta in RAM: se spegniamo il servizio si dimentica tutto,
 // e per il corso va benissimo così (i database sono materia del corso di
 // architetture cloud).
+//
+// Dalla giornata 6 avvisa quando un'auto cambia stato (evento 'cambioStato'):
+// il servizio lo trasforma in un evento per gli uffici, su RabbitMQ.
 // ---------------------------------------------------------------------------
 
-export class MemoriaFlotta {
+import { EventEmitter } from 'node:events';
+
+export class MemoriaFlotta extends EventEmitter {
   constructor() {
+    super();
     this.ultimoStato = new Map(); // targa -> ultima telemetria ricevuta
     this.comandiInAttesa = new Map(); // targa -> elenco di comandi da consegnare
     this.connessione = new Map(); // targa -> "online" | "offline" (giornata 3, MQTT)
   }
 
-  /** Salva l'ultima telemetria di un'auto, al posto della precedente. */
+  /**
+   * Salva l'ultima telemetria di un'auto, al posto della precedente. Se lo
+   * stato è cambiato (per esempio da "in_uso" a "libera") lo dice a chi
+   * ascolta: memoria.on('cambioStato', (prima, dopo, dato) => ...).
+   */
   salvaTelemetria(dato) {
+    const precedente = this.ultimoStato.get(dato.targa);
     this.ultimoStato.set(dato.targa, dato);
+    if (precedente && precedente.stato !== dato.stato) {
+      this.emit('cambioStato', precedente.stato, dato.stato, dato);
+    }
   }
 
   /** Ricorda se un'auto è collegata al broker ("online") oppure no ("offline"). */
