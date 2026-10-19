@@ -13,10 +13,13 @@
     "auto": "node auto/index.js",
     "flotta": "node auto/flotta.js",
     "broker": "node broker/aedes.js",
-    "ascolta": "node strumenti/ascolta.js"
+    "ascolta": "node strumenti/ascolta.js",
+    "coap": "node strumenti/coap.js",
+    "sensore": "node strumenti/sensore-coap.js"
   },
   "dependencies": {
-    "mqtt": "^5.16.0"
+    "mqtt": "^5.16.0",
+    "coap": "^1.6.0"
   },
   "devDependencies": {
     "aedes": "^1.2.0",

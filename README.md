@@ -49,8 +49,9 @@ Ogni branch è un passo del corso. Si parte da `main`.
 | `mqtt-soluzione` | **Giornata 3, completata.** La telemetria viaggia su MQTT, con lo stato online/offline e il testamento. I comandi restano in HTTP fino alla giornata 4. |
 | `mqtt-comandi` | **Giornata 4, da completare.** Parte da `mqtt-soluzione`: i comandi passano dal broker, il polling sparisce. TODO nell'auto, nel servizio e (se avanza tempo) nella dashboard. |
 | `mqtt-comandi-soluzione` | **Giornata 4, completata.** Comandi su MQTT con QoS 1, sessione ricordata a richiesta, dashboard in diretta dal broker via WebSocket. |
+| `coap` | **Giornata 5, niente da completare.** Parte da `mqtt-comandi-soluzione` e aggiunge due strumenti: un client CoAP da terminale e un sensore di parcheggio finto che parla CoAP. Il progetto della flotta non cambia. |
 
-I passi successivi (CoAP, AMQP, sicurezza) arriveranno come nuovi branch.
+I passi successivi (AMQP, sicurezza) arriveranno come nuovi branch.
 
 Prima di cominciare, creiamo un branch nostro, così il nostro lavoro resta separato da quello del corso:
 
@@ -103,6 +104,8 @@ broker/
   aedes.js              un broker di riserva in JavaScript, per chi non ha Docker (porte 1883 e 9001)
 strumenti/
   ascolta.js            stampa i messaggi che passano dal broker
+  coap.js               un client CoAP da terminale: get, scopri, osserva   (giornata 5)
+  sensore-coap.js       un sensore di parcheggio finto che parla CoAP       (giornata 5)
 ```
 
 ## La regola che rende il progetto interessante
@@ -191,6 +194,38 @@ SESSIONE=ricordata npm run auto                       # bash
 $env:SESSIONE="ricordata"; npm run auto               # PowerShell
 ```
 
+## Giornata 5: CoAP dal terminale
+
+Oggi il progetto resta fermo: parliamo con un server CoAP che esiste già, dal terminale. Ci portiamo dentro il branch `coap` e installiamo la libreria [`coap`](https://www.npmjs.com/package/coap):
+
+```
+git merge coap
+npm install
+```
+
+Poi i passi del laboratorio, contro il sandbox pubblico di Eclipse Californium:
+
+```
+npm run coap -- get /test              # 1. una GET semplice: guardiamo il codice 2.05
+npm run coap -- scopri                 # 2. GET /.well-known/core: cosa c'è su questo server?
+npm run coap -- osserva /obs           # 3. gli aggiornamenti arrivano da soli (Ctrl+C per smettere)
+npm run coap -- get /test --non        #    la stessa GET non confermabile, da guardare in Wireshark
+```
+
+Per il passo 4 apriamo Wireshark con il filtro `coap` e rifacciamo la GET: contiamo i byte e confrontiamoli con i circa 700 di una GET HTTP.
+
+**Se la rete blocca UDP verso l'esterno** (la richiesta resta senza risposta), accendiamo il sensore finto in un altro terminale e rifacciamo gli stessi comandi verso il nostro computer:
+
+```
+npm run sensore
+COAP=coap://localhost npm run coap -- scopri                 # bash
+$env:COAP="coap://localhost"; npm run coap -- scopri         # PowerShell
+```
+
+Il sensore espone anche `/posto/12`, che passa da libero a occupato da solo: è la risorsa da osservare.
+
+`strumenti/coap.js` è una pagina di codice: vale la pena aprirlo. La libreria somiglia a `node:http` (`coap.request`, `coap.createServer`), e la differenza con HTTP sta tutta in due opzioni: `observe` e `confirmable`.
+
 ## Provare con curl
 
 Su Windows, in PowerShell, scriviamo `curl.exe` e non `curl`: il secondo è un'altra cosa.
@@ -207,7 +242,9 @@ curl -i -X POST http://localhost:3000/comandi -H "Content-Type: application/json
 - **`ECONNREFUSED`** nell'auto: il servizio è spento, o è su un'altra porta. Con `SERVIZIO=http://localhost:3001 npm run auto` l'auto lo cerca altrove.
 - **`fetch is not defined`**: Node.js è troppo vecchio. Serve la versione 20 o successiva.
 - **`Nessun endpoint per ...`**: l'endpoint non è ancora scritto, o l'indirizzo ha un errore di battitura.
-- **`Cannot find package 'mqtt'`**: manca `npm install` (dalla giornata 3).
+- **`Cannot find package 'mqtt'`** (o `'coap'`): manca `npm install` (dalla giornata 3).
+- **`Nessuna risposta in 10 secondi`** da `npm run coap`: la rete blocca UDP sulla porta 5683. Usiamo il sensore finto (`npm run sensore`) con `COAP=coap://localhost`.
+- **`EADDRINUSE`** da `npm run sensore`: c'è già un sensore acceso, oppure un altro programma usa la porta 5683. `PORTA_COAP=5684 npm run sensore` e `COAP=coap://localhost:5684`.
 - **`broker non raggiungibile: ECONNREFUSED`**: il broker è spento. `docker compose up -d` nella cartella `broker/`, oppure `npm run broker`.
 - **I messaggi partono ma il servizio non li vede**: il topic di chi pubblica e il filtro di chi si iscrive non coincidono. Maiuscole, barre in più, prefissi diversi: guardiamo i topic veri in MQTT Explorer.
 - **L'auto si scollega e ricollega di continuo**: c'è un'altra auto con la stessa targa sullo stesso broker, cioè lo stesso clientId.
