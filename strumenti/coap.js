@@ -16,6 +16,7 @@
 //     $env:COAP="coap://localhost"; npm run coap -- scopri    (PowerShell)
 //
 // Al posto del percorso si può scrivere un indirizzo completo, coap://...
+// La barra iniziale si può omettere (get test): in Git Bash a volte serve.
 // ---------------------------------------------------------------------------
 
 import coap from 'coap';
@@ -34,7 +35,24 @@ const NOMI = {
   '5.00': 'Internal Server Error', '5.03': 'Service Unavailable',
 };
 
+// Git Bash su Windows "aiuta" troppo: un argomento che comincia con la barra
+// lo prende per un percorso di file e lo riscrive, così /test arriva qui come
+// C:/Program Files/Git/test. Se riconosciamo il trucco togliamo la parte
+// aggiunta; il percorso si può anche scrivere senza barra (get test).
+function ripulisci(percorso) {
+  if (!/^[A-Za-z]:[\\/]/.test(percorso)) return percorso;
+  const normale = percorso.replaceAll('\\', '/');
+  const radice = (process.env.EXEPATH ?? '').replaceAll('\\', '/').replace(/\/(usr\/)?bin\/?$/i, '').replace(/\/$/, '');
+  if (radice && normale.toLowerCase().startsWith(radice.toLowerCase() + '/')) return normale.slice(radice.length);
+  const git = normale.search(/\/Git\//i);
+  if (git >= 0) return normale.slice(git + 4);
+  console.log(`!! "${percorso}" sembra un percorso di Windows: in Git Bash scriviamo il percorso senza la barra iniziale (get test).`);
+  process.exit(1);
+}
+
 function indirizzo(percorso) {
+  percorso = ripulisci(percorso);
+  if (!percorso.startsWith('/') && !percorso.startsWith('coap://')) percorso = '/' + percorso;
   const url = new URL(percorso.startsWith('coap://') ? percorso : SERVER + percorso);
   // "localhost" può diventare ::1 (IPv6) mentre il sensore ascolta su IPv4.
   if (url.hostname === 'localhost') url.hostname = '127.0.0.1';
