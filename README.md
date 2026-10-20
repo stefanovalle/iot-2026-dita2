@@ -243,6 +243,7 @@ curl -i -X POST http://localhost:3000/comandi -H "Content-Type: application/json
 - **`fetch is not defined`**: Node.js è troppo vecchio. Serve la versione 20 o successiva.
 - **`Nessun endpoint per ...`**: l'endpoint non è ancora scritto, o l'indirizzo ha un errore di battitura.
 - **`Cannot find package 'mqtt'`** (o `'coap'`): manca `npm install` (dalla giornata 3).
+- **`ENOTFOUND` da `npm run coap`, con un indirizzo come `californium.eclipseprojects.ioC/Program Files/Git/test`**: è Git Bash, che riscrive gli argomenti che cominciano con la barra come se fossero file. Il client lo riconosce e lo corregge da solo; se non ci riesce, scriviamo il percorso senza barra: `npm run coap -- get test`.
 - **`Nessuna risposta in 10 secondi`** da `npm run coap`: la rete blocca UDP sulla porta 5683. Usiamo il sensore finto (`npm run sensore`) con `COAP=coap://localhost`.
 - **`EADDRINUSE`** da `npm run sensore`: c'è già un sensore acceso, oppure un altro programma usa la porta 5683. `PORTA_COAP=5684 npm run sensore` e `COAP=coap://localhost:5684`.
 - **`broker non raggiungibile: ECONNREFUSED`**: il broker è spento. `docker compose up -d` nella cartella `broker/`, oppure `npm run broker`.
